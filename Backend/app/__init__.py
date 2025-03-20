@@ -2,6 +2,7 @@ from flask import Flask
 from flask_cors import CORS  # Import CORS
 from app.routes import main_routes
 from app.chat import chat_routes
+from app.questions import ques_routes
 
 def create_app():
     app = Flask(__name__)
@@ -12,5 +13,6 @@ def create_app():
 
     app.register_blueprint(main_routes)  # Register routes
     app.register_blueprint(chat_routes, url_prefix="/api/")  # Register routes
+    app.register_blueprint(ques_routes, url_prefix="/api/")  # Register routes
     
     return app
