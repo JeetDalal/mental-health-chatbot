@@ -1,5 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
+import 'package:mental_health_chatbot/provider/auth_provider.dart';
+import 'package:mental_health_chatbot/screens/screen_controller.dart';
+import 'package:provider/provider.dart';
+// import 'package:mental_health_chatbot/providers/auth_provider.dart';
+import 'package:mental_health_chatbot/screens/register_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -15,8 +20,10 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final authProvider = Provider.of<AuthProvider>(context);
+
     return Scaffold(
-      backgroundColor: const Color(0xFF2A2F4F), // Matching splash screen color
+      backgroundColor: const Color(0xFF2A2F4F),
       body: SingleChildScrollView(
         child: SafeArea(
           child: Padding(
@@ -27,8 +34,6 @@ class _LoginScreenState extends State<LoginScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const SizedBox(height: 40),
-
-                  // Logo
                   Center(
                     child: Image.network(
                       'https://cdn-icons-png.flaticon.com/512/4076/4076478.png',
@@ -36,10 +41,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       width: 120,
                     ).animate().fadeIn(duration: 1000.ms).scale(delay: 500.ms),
                   ),
-
                   const SizedBox(height: 40),
-
-                  // Welcome Text
                   const Text(
                     'Welcome Back',
                     style: TextStyle(
@@ -51,9 +53,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       .animate()
                       .fadeIn(delay: 800.ms, duration: 800.ms)
                       .slideY(begin: 0.3),
-
                   const SizedBox(height: 8),
-
                   const Text(
                     'Your journey to wellness continues here',
                     style: TextStyle(
@@ -64,10 +64,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       .animate()
                       .fadeIn(delay: 1000.ms, duration: 800.ms)
                       .slideY(begin: 0.3),
-
                   const SizedBox(height: 40),
-
-                  // Email Field
                   TextFormField(
                     controller: _emailController,
                     style: const TextStyle(color: Colors.white),
@@ -90,10 +87,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       return null;
                     },
                   ).animate().fadeIn(delay: 1200.ms).slideX(begin: -0.2),
-
                   const SizedBox(height: 20),
-
-                  // Password Field
                   TextFormField(
                     controller: _passwordController,
                     obscureText: true,
@@ -117,35 +111,51 @@ class _LoginScreenState extends State<LoginScreen> {
                       return null;
                     },
                   ).animate().fadeIn(delay: 1400.ms).slideX(begin: 0.2),
-
                   const SizedBox(height: 12),
-
-                  // Forgot Password
                   Align(
                     alignment: Alignment.centerRight,
                     child: TextButton(
-                      onPressed: () {
-                        // Handle forgot password
-                      },
+                      onPressed: () {},
                       child: const Text(
                         'Forgot Password?',
                         style: TextStyle(color: Colors.white70),
                       ),
                     ),
                   ).animate().fadeIn(delay: 1600.ms),
-
                   const SizedBox(height: 30),
-
-                  // Login Button
+                  if (authProvider.errorMessage != null)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: Text(
+                        authProvider.errorMessage!,
+                        style: const TextStyle(color: Colors.red, fontSize: 14),
+                      ),
+                    ),
                   SizedBox(
                     width: double.infinity,
                     height: 55,
                     child: ElevatedButton(
-                      onPressed: () {
-                        if (_formKey.currentState?.validate() ?? false) {
-                          // Handle login
-                        }
-                      },
+                      onPressed: authProvider.isLoading
+                          ? null
+                          : () async {
+                              if (_formKey.currentState?.validate() ?? false) {
+                                await authProvider
+                                    .login(
+                                  _emailController.text,
+                                  _passwordController.text,
+                                )
+                                    .then(
+                                  (value) {
+                                    if (value) {
+                                      Navigator.of(context).pushReplacement(
+                                          MaterialPageRoute(
+                                              builder: (context) =>
+                                                  const MainScreen()));
+                                    }
+                                  },
+                                );
+                              }
+                            },
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.white,
                         foregroundColor: const Color(0xFF2A2F4F),
@@ -153,19 +163,18 @@ class _LoginScreenState extends State<LoginScreen> {
                           borderRadius: BorderRadius.circular(12),
                         ),
                       ),
-                      child: const Text(
-                        'Login',
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
+                      child: authProvider.isLoading
+                          ? const CircularProgressIndicator(color: Colors.blue)
+                          : const Text(
+                              'Login',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
                     ),
                   ).animate().fadeIn(delay: 1800.ms).slideY(begin: 0.2),
-
                   const SizedBox(height: 30),
-
-                  // Register Option
                   Center(
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.center,
@@ -176,7 +185,8 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                         TextButton(
                           onPressed: () {
-                            // Navigate to register screen
+                            Navigator.of(context).push(MaterialPageRoute(
+                                builder: (context) => RegisterScreen()));
                           },
                           child: const Text(
                             'Register',

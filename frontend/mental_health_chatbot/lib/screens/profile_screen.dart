@@ -1,11 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
+import 'package:mental_health_chatbot/provider/auth_provider.dart';
+import 'package:mental_health_chatbot/screens/login_screen.dart';
+import 'package:provider/provider.dart';
 
 class ProfileScreen extends StatelessWidget {
   const ProfileScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
+    final _authProvider = Provider.of<AuthProvider>(context);
     return Scaffold(
       backgroundColor: const Color(0xFF2A2F4F),
       body: SingleChildScrollView(
@@ -20,7 +24,7 @@ class ProfileScreen extends StatelessWidget {
             const SizedBox(height: 24),
 
             // Stats Cards
-            _buildStatsSection()
+            _buildStatsSection(_authProvider)
                 .animate()
                 .fadeIn(delay: 200.ms)
                 .slideX(begin: -0.2),
@@ -36,7 +40,7 @@ class ProfileScreen extends StatelessWidget {
             const SizedBox(height: 24),
 
             // Settings Section
-            _buildSettingsSection()
+            _buildSettingsSection(_authProvider, context)
                 .animate()
                 .fadeIn(delay: 600.ms)
                 .slideY(begin: 0.2),
@@ -146,7 +150,7 @@ class ProfileScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildStatsSection() {
+  Widget _buildStatsSection(AuthProvider _authProvider) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 24),
       child: Column(
@@ -168,6 +172,7 @@ class ProfileScreen extends StatelessWidget {
                   'Journal Entries',
                   '28',
                   Icons.book,
+                  _authProvider,
                 ),
               ),
               const SizedBox(width: 16),
@@ -176,6 +181,7 @@ class ProfileScreen extends StatelessWidget {
                   'Chat Sessions',
                   '15',
                   Icons.chat_bubble,
+                  _authProvider,
                 ),
               ),
             ],
@@ -188,6 +194,7 @@ class ProfileScreen extends StatelessWidget {
                   'Streak',
                   '7 days',
                   Icons.local_fire_department,
+                  _authProvider,
                 ),
               ),
               const SizedBox(width: 16),
@@ -196,6 +203,7 @@ class ProfileScreen extends StatelessWidget {
                   'Mood Average',
                   '😊',
                   Icons.emoji_emotions,
+                  _authProvider,
                 ),
               ),
             ],
@@ -205,7 +213,7 @@ class ProfileScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildStatCard(String title, String value, IconData icon) {
+  Widget _buildStatCard(String title, String value, IconData icon, _provider) {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -324,7 +332,8 @@ class ProfileScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildSettingsSection() {
+  Widget _buildSettingsSection(
+      AuthProvider _authProvider, BuildContext context) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 24),
       child: Column(
@@ -368,7 +377,11 @@ class ProfileScreen extends StatelessWidget {
             'Logout',
             Icons.logout,
             isDestructive: true,
-            onTap: () {},
+            onTap: () async {
+              await _authProvider.logout();
+              Navigator.of(context).pushReplacement(
+                  MaterialPageRoute(builder: (context) => const LoginScreen()));
+            },
           ),
         ],
       ),

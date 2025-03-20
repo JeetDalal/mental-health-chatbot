@@ -1,6 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:mental_health_chatbot/constants/constants.dart';
+import 'package:record/record.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+import 'dart:io';
+import 'package:path_provider/path_provider.dart';
 
 class ChatInterface extends StatefulWidget {
   const ChatInterface({super.key});
@@ -13,6 +18,9 @@ class _ChatInterfaceState extends State<ChatInterface> {
   final TextEditingController _messageController = TextEditingController();
   final List<ChatMessage> _messages = [];
   final ScrollController _scrollController = ScrollController();
+  // Fix: Use AudioRecorder() instead of Record() - the concrete implementation
+  final recorder = AudioRecorder();
+  bool _isRecording = false;
 
   @override
   void initState() {
@@ -25,6 +33,155 @@ class _ChatInterfaceState extends State<ChatInterface> {
         isBot: true,
       ),
     );
+  }
+
+  Future<void> _startRecording() async {
+    if (await recorder.hasPermission()) {
+      final directory = await getApplicationDocumentsDirectory();
+      final path = '${directory.path}/audio.wav';
+      await recorder.start(RecordConfig(), path: path);
+      setState(() {
+        _isRecording = true;
+      });
+    }
+  }
+
+  Future<void> _stopRecording() async {
+    final path = await recorder.stop();
+    setState(() {
+      _isRecording = false;
+    });
+    if (path != null) {
+      _sendAudioToRevAI(File(path));
+    }
+  }
+
+  Future<void> _sendAudioToRevAI(File audioFile) async {
+    final apiKey = 'YOUR_REV_AI_API_KEY'; // Replace with your Rev AI API key
+    final url = 'https://api.rev.ai/speechtotext/v1/jobs';
+    final headers = {
+      'Authorization': 'Bearer $apiKey',
+      'Content-Type': 'multipart/form-data', // Fixed content type
+    };
+
+    final request = http.MultipartRequest('POST', Uri.parse(url))
+      ..headers.addAll(headers)
+      ..files.add(await http.MultipartFile.fromPath('media', audioFile.path));
+
+    final response = await request.send();
+    if (response.statusCode == 200) {
+      final responseData = await response.stream.bytesToString();
+      final data = jsonDecode(responseData);
+      final jobId = data['id'];
+      _checkRevAIJobStatus(jobId);
+    } else {
+      // Handle error
+      setState(() {
+        _messages.add(
+          ChatMessage(
+            message: "Sorry, there was an error processing your audio.",
+            isBot: true,
+          ),
+        );
+      });
+    }
+  }
+
+  Future<void> _checkRevAIJobStatus(String jobId) async {
+    final apiKey = 'YOUR_REV_AI_API_KEY'; // Replace with your Rev AI API key
+    final url = 'https://api.rev.ai/speechtotext/v1/jobs/$jobId';
+    final headers = {
+      'Authorization': 'Bearer $apiKey',
+    };
+
+    final response = await http.get(Uri.parse(url), headers: headers);
+    if (response.statusCode == 200) {
+      final data = jsonDecode(response.body);
+      if (data['status'] == 'transcribed') {
+        final transcriptUrl =
+            'https://api.rev.ai/speechtotext/v1/jobs/$jobId/transcript';
+        _getTranscript(transcriptUrl);
+      } else {
+        // Retry after some time
+        Future.delayed(const Duration(seconds: 5), () {
+          _checkRevAIJobStatus(jobId);
+        });
+      }
+    } else {
+      // Handle error
+      setState(() {
+        _messages.add(
+          ChatMessage(
+            message:
+                "Sorry, there was an error checking the status of your audio transcription.",
+            isBot: true,
+          ),
+        );
+      });
+    }
+  }
+
+  Future<void> _getTranscript(String transcriptUrl) async {
+    final apiKey = 'YOUR_REV_AI_API_KEY'; // Replace with your Rev AI API key
+    final headers = {
+      'Authorization': 'Bearer $apiKey',
+      'Accept': 'application/json',
+    };
+
+    final response = await http.get(Uri.parse(transcriptUrl), headers: headers);
+    if (response.statusCode == 200) {
+      final data = jsonDecode(response.body);
+      final transcript =
+          data['monologues'][0]['elements'].map((e) => e['value']).join(' ');
+      _analyzeSentiment(transcript);
+    } else {
+      // Handle error
+      setState(() {
+        _messages.add(
+          ChatMessage(
+            message: "Sorry, there was an error retrieving your transcript.",
+            isBot: true,
+          ),
+        );
+      });
+    }
+  }
+
+  Future<void> _analyzeSentiment(String text) async {
+    // Add the user's message to the chat
+    setState(() {
+      _messages.add(ChatMessage(message: text, isBot: false));
+    });
+
+    // Scroll to bottom
+    _scrollToBottom();
+
+    // Simple sentiment response (replace with actual sentiment analysis)
+    Future.delayed(const Duration(seconds: 1), () {
+      setState(() {
+        _messages.add(
+          ChatMessage(
+            message: "I heard what you said. How else can I help you today?",
+            isBot: true,
+          ),
+        );
+      });
+
+      // Scroll to bottom again after bot response
+      _scrollToBottom();
+    });
+  }
+
+  void _scrollToBottom() {
+    Future.delayed(const Duration(milliseconds: 100), () {
+      if (_scrollController.hasClients) {
+        _scrollController.animateTo(
+          _scrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      }
+    });
   }
 
   void _sendMessage() {
@@ -40,16 +197,11 @@ class _ChatInterfaceState extends State<ChatInterface> {
     });
 
     // Clear input field
+    String userMessage = _messageController.text;
     _messageController.clear();
 
     // Scroll to bottom
-    Future.delayed(const Duration(milliseconds: 100), () {
-      _scrollController.animateTo(
-        _scrollController.position.maxScrollExtent,
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeOut,
-      );
-    });
+    _scrollToBottom();
 
     // Simulate bot response (replace with actual bot logic)
     Future.delayed(const Duration(seconds: 1), () {
@@ -64,13 +216,7 @@ class _ChatInterfaceState extends State<ChatInterface> {
       });
 
       // Scroll to bottom again after bot response
-      Future.delayed(const Duration(milliseconds: 100), () {
-        _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeOut,
-        );
-      });
+      _scrollToBottom();
     });
   }
 
@@ -173,12 +319,34 @@ class _ChatInterfaceState extends State<ChatInterface> {
                     color: const Color(0xFF2A2F4F),
                   ),
                 ),
+                const SizedBox(width: 8),
+                Container(
+                  decoration: BoxDecoration(
+                    color: _isRecording ? Colors.red : Colors.white,
+                    borderRadius: BorderRadius.circular(25),
+                  ),
+                  child: IconButton(
+                    onPressed: _isRecording ? _stopRecording : _startRecording,
+                    icon: Icon(
+                      _isRecording ? Icons.stop : Icons.mic,
+                      color: const Color(0xFF2A2F4F),
+                    ),
+                  ),
+                ),
               ],
             ),
           ),
         ],
       ),
     );
+  }
+
+  @override
+  void dispose() {
+    _messageController.dispose();
+    _scrollController.dispose();
+    recorder.dispose();
+    super.dispose();
   }
 }
 

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:intl/intl.dart';
+import 'package:mental_health_chatbot/screens/events_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -261,7 +262,8 @@ class _HomeScreenState extends State<HomeScreen> {
               'Events and Activities',
               Icons.self_improvement,
               () {
-                // Navigator.of(context).push
+                Navigator.of(context).push(
+                    MaterialPageRoute(builder: (context) => EventsScreen()));
               },
             ),
             _buildQuickAccessCard(
