@@ -12,6 +12,7 @@ from langchain.chains import LLMChain
 from langchain.memory import ChatMessageHistory, ConversationBufferMemory
 from langchain.schema import HumanMessage, AIMessage
 import re
+import json
 from app.config import Config 
 
 # Define the chat routes Blueprint
@@ -62,21 +63,55 @@ def get_llm():
     )
 
 # Define the prompt template for emotion analysis
+# EMOTION_ANALYSIS_PROMPT = PromptTemplate(
+#     input_variables=["query"],
+#     template="""You are an empathetic mental health assistant trained to identify emotions in text.
+    
+#     Analyze the following message and identify the emotional content, including:
+#     - Primary emotion
+#     - Intensity (1-10)
+#     - Any secondary emotions
+#     - Potential triggers mentioned
+    
+#     USER MESSAGE: {query}
+    
+#     Provide your analysis in a structured format. Be sensitive and avoid making assumptions beyond what's in the text.
+#     """
+# )
+
 EMOTION_ANALYSIS_PROMPT = PromptTemplate(
-    input_variables=["query"],
-    template="""You are an empathetic mental health assistant trained to identify emotions in text.
-    
-    Analyze the following message and identify the emotional content, including:
-    - Primary emotion
-    - Intensity (1-10)
-    - Any secondary emotions
-    - Potential triggers mentioned
-    
-    USER MESSAGE: {query}
-    
-    Provide your analysis in a structured format. Be sensitive and avoid making assumptions beyond what's in the text.
-    """
-)
+            input_variables=["query"],
+            template="""You are an empathetic mental health assistant trained to identify emotions in text.
+            
+            Analyze the following message and identify the emotional content:
+            
+            USER MESSAGE: {query}
+            
+            Respond ONLY with a JSON object using this exact format:
+            {{
+                "primary_emotion": {{
+                    "emotion": "name of main emotion",
+                    "intensity": numerical value from 1-10
+                }},
+                "secondary_emotions": [
+                    {{
+                        "emotion": "first secondary emotion",
+                        "intensity": numerical value from 1-10
+                    }},
+                    {{
+                        "emotion": "second secondary emotion",
+                        "intensity": numerical value from 1-10
+                    }}
+                ],
+                "triggers": [
+                    "first identified trigger",
+                    "second identified trigger"
+                ]
+            }}
+            
+            Return valid JSON with no explanation or additional text.
+            """
+        )
 
 # Define the prompt template for generating responses with RAG
 RAG_RESPONSE_PROMPT = PromptTemplate(
@@ -128,12 +163,53 @@ def format_docs(docs):
 retriever = get_retriever()
 llm = get_llm()
 
-# Create the emotion analysis chain
-emotion_analysis_chain = LLMChain(
-    llm=llm,
-    prompt=EMOTION_ANALYSIS_PROMPT,
-    output_key="emotion_analysis"
+# # Create the emotion analysis chain
+# emotion_analysis_chain = LLMChain(
+#     llm=llm,
+#     prompt=EMOTION_ANALYSIS_PROMPT,
+#     output_key="emotion_analysis"
+# )
+
+# Chain that combines the prompt with LLM and produces a string output
+emotion_analysis_chain = (
+    {
+        "query": RunnablePassthrough()
+    }
+    | EMOTION_ANALYSIS_PROMPT
+    | llm
+    | StrOutputParser()
 )
+
+# Helper function to parse the JSON result
+def parse_emotion_result(json_result):
+    try:
+        # Find JSON object in the response (in case LLM adds extra text)
+        json_start = json_result.find('{')
+        json_end = json_result.rfind('}') + 1
+        if json_start >= 0 and json_end > json_start:
+            json_str = json_result[json_start:json_end]
+            return json.loads(json_str)
+        else:
+            # Fallback in case no JSON formatting is found
+            return {
+                "primary_emotion": {
+                    "emotion": "unknown",
+                    "intensity": 5
+                },
+                "secondary_emotions": [],
+                "triggers": []
+            }
+    except json.JSONDecodeError:
+        # Fallback if JSON parsing fails
+        return {
+            "primary_emotion": {
+                "emotion": "unknown",
+                "intensity": 5
+            },
+            "secondary_emotions": [],
+            "triggers": [],
+            "error": "Failed to parse emotion analysis"
+        }
 
 # Get or create memory for a session
 def get_memory(session_id):
@@ -199,7 +275,30 @@ def handle_small_talk(query, memory):
     # Execute the chain
     return small_talk_chain.invoke(query)
 
-# Create the RAG response chain
+# Create a proper RAG chain
+def setup_rag_chain():
+    # Set up the retrieval chain
+    retrieval_chain = retriever | format_docs
+    
+    # Create the full RAG chain
+    rag_chain = (
+        {
+            "context": lambda x: retrieval_chain.invoke(x["query"]),
+            "query": lambda x: x["query"],
+            "emotion_analysis": lambda x: x["emotion_analysis"],
+            "chat_history": lambda x: x["chat_history"]
+        }
+        | RAG_RESPONSE_PROMPT
+        | llm
+        | StrOutputParser()
+    )
+    
+    return rag_chain
+
+# Initialize the RAG chain
+rag_chain = setup_rag_chain()
+
+# Generate RAG response
 def generate_rag_response(query, emotion_analysis, memory):
     # Get chat history from memory
     chat_history = memory.load_memory_variables({})["chat_history"]
@@ -212,21 +311,15 @@ def generate_rag_response(query, emotion_analysis, memory):
         elif isinstance(message, AIMessage):
             formatted_history += f"ASSISTANT: {message.content}\n"
     
-    # Define the chain
-    rag_chain = (
-        {
-            "context": retriever | format_docs, 
-            "query": RunnablePassthrough(), 
-            "emotion_analysis": lambda _: emotion_analysis,
-            "chat_history": lambda _: formatted_history
-        }
-        | RAG_RESPONSE_PROMPT
-        | llm
-        | StrOutputParser()
-    )
+    # Prepare the input for the RAG chain
+    chain_input = {
+        "query": query,
+        "emotion_analysis": emotion_analysis,
+        "chat_history": formatted_history
+    }
     
     # Execute the chain
-    return rag_chain.invoke(query)
+    return rag_chain.invoke(chain_input)
 
 # Function to detect potentially critical situations
 def detect_crisis(query, emotion_analysis):
@@ -238,17 +331,19 @@ def detect_crisis(query, emotion_analysis):
         return True
     
     # Check for high intensity negative emotions
-    if "emotion_analysis" in emotion_analysis:
+    if isinstance(emotion_analysis, str) and "primary_emotion" in emotion_analysis:
         try:
             # Parse the emotion data from the LLM response
-            primary_emotion = re.search(r"primary_emotion.*?:\s*(\w+)", emotion_analysis).group(1).lower()
-            intensity_match = re.search(r"intensity.*?:\s*(\d+)", emotion_analysis)
-            if intensity_match:
-                intensity = int(intensity_match.group(1))
-                
-                high_risk_emotions = ["despair", "hopeless", "suicidal"]
-                if (primary_emotion in high_risk_emotions and intensity > 7) or intensity == 10:
-                    return True
+            primary_emotion = re.search(r"primary_emotion.*?:\s*(\w+)", emotion_analysis)
+            if primary_emotion:
+                primary_emotion = primary_emotion.group(1).lower()
+                intensity_match = re.search(r"intensity.*?:\s*(\d+)", emotion_analysis)
+                if intensity_match:
+                    intensity = int(intensity_match.group(1))
+                    
+                    high_risk_emotions = ["despair", "hopeless", "suicidal"]
+                    if (primary_emotion in high_risk_emotions and intensity > 7) or intensity == 10:
+                        return True
         except:
             pass
     
@@ -289,7 +384,9 @@ def chat():
         else:
             # Process as a regular mental health query
             # Run emotion analysis
-            emotion_result = emotion_analysis_chain.run(query=user_query)
+            # emotion_result = emotion_analysis_chain.run(query=user_query)
+            emotion_result = emotion_analysis_chain.invoke(user_query)
+            emotion_data = parse_emotion_result(emotion_result)
             
             # Check for crisis situations
             is_crisis = detect_crisis(user_query, emotion_result)
@@ -316,7 +413,7 @@ def chat():
             # Create structured response
             api_response = {
                 "message": final_response,
-                "emotion_analysis": emotion_result,
+                "emotion_analysis": emotion_data,
                 "is_crisis": is_crisis,
                 "is_small_talk": False
             }
@@ -327,7 +424,26 @@ def chat():
         print(f"Error: {str(e)}")
         return jsonify({"error": "An error occurred processing your request", "details": str(e)}), 500
 
-# Route for getting emotional analysis only
+# # Route for getting emotional analysis only
+# @chat_routes.route("/analyze-emotion", methods=["POST"])
+# def analyze_emotion():
+#     data = request.get_json()
+#     user_query = data.get("message", "")
+    
+#     if not user_query:
+#         return jsonify({"error": "No message provided"}), 400
+    
+#     try:
+#         # Run emotion analysis
+#         emotion_result = emotion_analysis_chain.run(query=user_query)
+#         return jsonify({"emotion_analysis": emotion_result})
+    
+#     except Exception as e:
+#         return jsonify({"error": "An error occurred processing your request", "details": str(e)}), 500
+
+
+
+# Updated route for getting emotional analysis as JSON with the specific format
 @chat_routes.route("/analyze-emotion", methods=["POST"])
 def analyze_emotion():
     data = request.get_json()
@@ -337,12 +453,90 @@ def analyze_emotion():
         return jsonify({"error": "No message provided"}), 400
     
     try:
-        # Run emotion analysis
-        emotion_result = emotion_analysis_chain.run(query=user_query)
-        return jsonify({"emotion_analysis": emotion_result})
+        # Define a structured prompt for the desired JSON output format
+        json_emotion_prompt = PromptTemplate(
+            input_variables=["query"],
+            template="""You are an empathetic mental health assistant trained to identify emotions in text.
+            
+            Analyze the following message and identify the emotional content:
+            
+            USER MESSAGE: {query}
+            
+            Respond ONLY with a JSON object using this exact format:
+            {{
+                "primary_emotion": {{
+                    "emotion": "name of main emotion",
+                    "intensity": numerical value from 1-10
+                }},
+                "secondary_emotions": [
+                    {{
+                        "emotion": "first secondary emotion",
+                        "intensity": numerical value from 1-10
+                    }},
+                    {{
+                        "emotion": "second secondary emotion",
+                        "intensity": numerical value from 1-10
+                    }}
+                ],
+                "triggers": [
+                    "first identified trigger",
+                    "second identified trigger"
+                ]
+            }}
+            
+            Return valid JSON with no explanation or additional text.
+            """
+        )
+        
+        # Create the emotion analysis chain with JSON output
+        json_emotion_chain = (
+            {"query": RunnablePassthrough()}
+            | json_emotion_prompt
+            | llm
+            | StrOutputParser()
+        )
+        
+        # Execute the chain
+        json_result = json_emotion_chain.invoke(user_query)
+        
+        # Parse the result to ensure it's valid JSON
+        try:
+            # Find JSON object in the response (in case LLM adds extra text)
+            json_start = json_result.find('{')
+            json_end = json_result.rfind('}') + 1
+            if json_start >= 0 and json_end > json_start:
+                json_str = json_result[json_start:json_end]
+                emotion_data = json.loads(json_str)
+            else:
+                # Fallback in case no JSON formatting is found
+                emotion_data = {
+                    "primary_emotion": {
+                        "emotion": "unknown",
+                        "intensity": 5
+                    },
+                    "secondary_emotions": [],
+                    "triggers": []
+                }
+                
+            return jsonify(emotion_data)
+            
+        except json.JSONDecodeError:
+            # Fallback if JSON parsing fails
+            return jsonify({
+                "primary_emotion": {
+                    "emotion": "unknown",
+                    "intensity": 5
+                },
+                "secondary_emotions": [],
+                "triggers": [],
+                "error": "Failed to parse emotion analysis"
+            })
     
     except Exception as e:
-        return jsonify({"error": "An error occurred processing your request", "details": str(e)}), 500
+        return jsonify({
+            "error": "An error occurred processing your request", 
+            "details": str(e)
+        }), 500
 
 # Route for clearing chat history
 @chat_routes.route("/clear-history", methods=["POST"])
