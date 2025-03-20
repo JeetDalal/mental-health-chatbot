@@ -1,1 +1,69 @@
 venv11/
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Environment variables and configuration files
+.env
+*.env
+
+# Instance folder (for Flask)
+instance/
+
+# Flask cache files
+flask_session/
+*.log
+
+# Virtual environment
+venv/
+ENV/
+env/
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+
+# PyInstaller
+*.spec
+
+# SQLite database files
+*.sqlite3
+*.db
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# macOS specific
+.DS_Store
+
+# Windows specific
+Thumbs.db
+desktop.ini
+
+# Python egg metadata
+*.egg
+.Python
+
+# Pipenv
+Pipfile.lock
+
+# pyenv
+.python-version
+
+# Coverage reports
+htmlcov/
+.coverage
+.coverage.*
+
+# MyPy cache
+.mypy_cache/
+
+# Pytest
+.pytest_cache/
+.cache/
+data/
