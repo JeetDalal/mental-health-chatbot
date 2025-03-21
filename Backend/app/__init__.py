@@ -1,7 +1,7 @@
 from flask import Flask
 from flask_cors import CORS  # Import CORS
 from app.routes import main_routes
-from app.chat import chat_routes
+from app.chatapp import chat_routes
 from app.questions import ques_routes
 
 def create_app():
